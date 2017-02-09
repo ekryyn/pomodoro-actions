@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import click
+import datetime
 from .config import DB_LOCATION
 from tinydb import TinyDB, Query
 import csv
@@ -9,6 +10,47 @@ try:
     from io import StringIO
 except ImportError:
     from StringIO import StringIO
+
+
+def _summary(db, start=None, end=None):
+    """
+    Get a summary of pomodoros for a given date range.
+
+    :param db: TinyDB connection
+    :param start: if given, only consider records from `start`
+    :type start: `datetime.datetime`
+    :param end: if given, only consider records until `end`
+    :type end: `datetime.datetime`
+    """
+    q = Query()
+
+    start = start or datetime.datetime(1970, 1, 1)
+    end = end or datetime.datetime.now()
+
+    start = str(start)
+    end = str(end)
+
+    date_range = (q.timestamp >= start) & (q.timestamp < end)
+
+    complete = db.count((q.state == 'pomodoro') &
+                        (q.triggers.any(['complete'])) &
+                        date_range)
+    started = db.count((q.state == 'pomodoro') &
+                       (q.triggers.any(['start'])) &
+                       date_range)
+    ratio = 0 if not started else complete/float(started) * 100
+    return {
+        'complete': complete,
+        'started': started,
+        'ratio': ratio,
+    }
+
+
+def summary_print(complete, started, ratio):
+    print("Pomodoro summary :")
+    print("  Complete pomodoros: {}".format(complete))
+    print("  Started pomodoros: {}".format(started))
+    print("  Ratio: {}%".format(ratio))
 
 
 @click.group()
@@ -23,17 +65,19 @@ def main(ctx, db_path):
 @click.pass_context
 def summary(ctx):
     db = TinyDB(ctx.obj['db_path'])
+    s = _summary(db)
+    summary_print(**s)
+    db.close()
 
-    q = Query()
-    pom_complete = db.count((q.state == 'pomodoro') &
-                            (q.triggers.any(['complete'])))
-    pom_started = db.count((q.state == 'pomodoro') &
-                            (q.triggers.any(['start'])))
-    ratio = 0 if not pom_started else pom_complete/float(pom_started) * 100
-    print("Pomodoro summary :")
-    print("  Complete pomodoros: {}".format(pom_complete))
-    print("  Started pomodoros: {}".format(pom_started))
-    print("  Ratio: {}%".format(ratio))
+
+@main.command()
+@click.pass_context
+def day_summary(ctx):
+    db = TinyDB(ctx.obj['db_path'])
+    st = datetime.datetime.now().replace(hour=0, minute=0, second=0)
+    en = st + datetime.timedelta(days=1)
+    s = _summary(db, st, en)
+    summary_print(**s)
     db.close()
 
 
